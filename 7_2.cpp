@@ -23,7 +23,13 @@ public:
 
     template<typename ...Args>
     void operator()(Args &&...args) {
-        _promise.set_value(fn(forward<Args>(args)...));
+
+        try {
+            _promise.set_value(fn(forward<Args>(args)...));
+        } catch (...) {
+            _promise.set_exception(current_exception());
+        }
+
     }
 
     promise<Res> _promise;
@@ -39,16 +45,29 @@ int product(int a, int b) {
     return a * b;
 }
 
+int product1(int a, int b) {
+    throw runtime_error("example error");
+}
+
 int main() {
     my_packaged_task<int(int, int)> task{product};
     future<int> res = task.get_future();
     int a = 10;
     int b = 20;
     thread th(move(task), a, b);
-    th.join();
+    th.detach();
+    cout << res.get() << endl;
 
-//    cout << task(a, b);
-    cout << res.get();
+
+    my_packaged_task<int(int, int)> test{product1};
+    future<int> res1 = test.get_future();
+    thread th1(move(test), a, b);
+    th1.detach();
+    try {
+        cout << res1.get();
+    } catch (const exception &e) {
+        cout << e.what() << endl;
+    }
 
     return 0;
 }

@@ -7,7 +7,7 @@
 #include <thread>
 
 using namespace std;
-namespace our {
+namespace MPCS51044 {
     template<typename T>
     /* will be owned by both future and promise */
     class shared_state {
@@ -15,9 +15,17 @@ namespace our {
         condition_variable _cv;
         bool _ready;
         T _res;
+        exception_ptr _e_ptr;
     public:
         shared_state()
-                : _ready(false), _res() { /* empty ctor body */ }
+                : _ready(false), _res() {}
+
+        void set_exception(exception_ptr &&ptr) {
+            lock_guard<mutex> lock(_mutex);
+            _e_ptr = move(ptr);
+            _ready = true;
+            _cv.notify_all();
+        }
 
         void set(T &&value) {
             lock_guard<mutex> lock(_mutex);
@@ -37,16 +45,21 @@ namespace our {
             /* predict to protect against spurious wakeup and lost wakeup*/
             _cv.wait(lock, [this] { return this->_ready; });
             lock.unlock();
+
+            /*if exception has been set, rethrow it*/
+            if (_e_ptr != nullptr) {
+                rethrow_exception(_e_ptr);
+            }
             return move(_res);
         }
     };
 }
-namespace our {
+namespace MPCS51044 {
     template<typename T>
     class future {
-        shared_ptr<our::shared_state<T>> _shared_state;
+        shared_ptr<MPCS51044::shared_state<T>> _shared_state;
     public:
-        future(shared_ptr<our::shared_state<T>> shared_state)
+        future(shared_ptr<MPCS51044::shared_state<T>> shared_state)
                 : _shared_state(move(shared_state)) {}
 
         // Our future will not be copied
@@ -60,27 +73,37 @@ namespace our {
         future<T> &operator=(future<T> &&) noexcept = default;
 
 
-        // Get the value
+        /*Get the value*/
         T get() {
             if (!_shared_state)
                 throw logic_error("get twice!");
 
+            /*wait_and_take() may throw exception, it will eventually be handled by user code!*/
             T value = _shared_state->wait_and_take();
-            // Remove our reference to the shared state
+            // Remove reference to the shared state
             _shared_state = nullptr;
             return move(value);
         }
+
+        void wait() {
+            /*perform busy wait*/
+            while (!_shared_state->ready()) {
+
+            }
+        }
+
     };
 }
 
-namespace our {
+namespace MPCS51044 {
     template<typename T>
     class promise {
-        shared_ptr<our::shared_state<T>> _shared_state;
+        shared_ptr<MPCS51044::shared_state<T>> _shared_state;
     public:
         promise() {
-            _shared_state = make_shared<our::shared_state<T>>();
+            _shared_state = make_shared<MPCS51044::shared_state<T>>();
         }
+
 
         // Our promise will not be copied
         promise(const promise<T> &) = delete;
@@ -92,11 +115,17 @@ namespace our {
 
         promise<T> &operator=(promise<T> &&) noexcept = default;
 
+        void set_exception(exception_ptr &&e_ptr) {
+            if (_shared_state) {
+                _shared_state->set_exception(move(e_ptr));
+                /*make sure set_value can not be performed after set_exception is called */
+                _shared_state = nullptr;
+            }
+        }
+
         void set_value(T &&value) {
             if (_shared_state) {
                 _shared_state->set(forward<T>(value));
-                /*make sure set_value can only take effect once */
-                _shared_state = nullptr;
             }
         }
 
