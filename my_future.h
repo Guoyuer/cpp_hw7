@@ -16,9 +16,10 @@ namespace MPCS51044 {
         bool _ready;
         T _res;
         exception_ptr _e_ptr;
+        bool _waited;
     public:
         shared_state()
-                : _ready(false), _res() {}
+                : _ready(false), _waited(false), _res() {}
 
         void set_exception(exception_ptr &&ptr) {
             lock_guard<mutex> lock(_mutex);
@@ -40,11 +41,22 @@ namespace MPCS51044 {
             return _ready;
         }
 
-        T wait_and_take() {
+        void wait() {
             unique_lock<mutex> lock(_mutex);
             /* predict to protect against spurious wakeup and lost wakeup*/
             _cv.wait(lock, [this] { return this->_ready; });
             lock.unlock();
+            _waited = true;
+        }
+
+        T wait_and_take() {
+            /* if wait() expires, should not wait signal */
+            if (!_waited) {
+                unique_lock<mutex> lock(_mutex);
+                /* predict to protect against spurious wakeup and lost wakeup*/
+                _cv.wait(lock, [this] { return this->_ready; });
+                lock.unlock();
+            }
 
             /*if exception has been set, rethrow it*/
             if (_e_ptr != nullptr) {
@@ -75,9 +87,6 @@ namespace MPCS51044 {
 
         /*Get the value*/
         T get() {
-            if (!_shared_state)
-                throw logic_error("get twice!");
-
             /*wait_and_take() may throw exception, it will eventually be handled by user code!*/
             T value = _shared_state->wait_and_take();
             // Remove reference to the shared state
@@ -86,10 +95,7 @@ namespace MPCS51044 {
         }
 
         void wait() {
-            /*perform busy wait*/
-            while (!_shared_state->ready()) {
-
-            }
+            _shared_state->wait();
         }
 
     };
@@ -112,6 +118,7 @@ namespace MPCS51044 {
 
         /* default move constructor, do a member-wise move.*/
         promise(promise<T> &&) = default;
+
 
         promise<T> &operator=(promise<T> &&) noexcept = default;
 

@@ -13,6 +13,7 @@ void product(promise<int> &&promise, int a, int b) {
 }
 
 void product1(promise<int> &&promise, int a, int b) {
+
     try {
         throw runtime_error("example error");
     } catch (...) {
