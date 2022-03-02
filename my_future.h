@@ -72,6 +72,7 @@ namespace MPCS51044 {
         shared_ptr<MPCS51044::shared_state<T>> _shared_state;
     public:
         future(shared_ptr<MPCS51044::shared_state<T>> shared_state)
+        /* shared_state is a tmp value, so move is faster. */
                 : _shared_state(move(shared_state)) {}
 
         // Our future will not be copied
